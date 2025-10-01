@@ -1,35 +1,34 @@
 export const runtime = 'edge';
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
 
-export async function POST(req) {
-  const ct = req.headers.get('content-type') || '';
-  let data = {};
-  if (ct.includes('application/json')) data = await req.json();
-  else if (ct.includes('application/x-www-form-urlencoded') || ct.includes('multipart/form-data')) {
-    const fd = await req.formData(); data = Object.fromEntries(fd.entries());
-  }
+// Interfaces will hit: GET /api/submit?email=...&name=...
+export async function GET(req) {
+  const urlIn = new URL(req.url);
+  const data = Object.fromEntries(urlIn.searchParams.entries());
 
-  const base = decideDestination(data);
-  const dest = new URL(base);
-  for (const [k, v] of Object.entries(data || {})) {
-    if (v != null) dest.searchParams.append(k, String(v));
-  }
-
-  // Optional: ping Zap in the background
+  // (optional) fire-and-forget to your Zap's Catch Hook
   const hook = process.env.ZAPIER_CATCH_HOOK_URL;
-  if (hook) fetch(hook, {
-    method: 'POST', headers: {'content-type':'application/json'},
-    body: JSON.stringify({ form: data, redirected_to: dest.toString() })
-  }).catch(()=>{});
+  if (hook) {
+    fetch(hook, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ form: data, source: 'interfaces-get' })
+    }).catch(() => {});
+  }
 
-  // Return HTML that breaks out of the iframe
-  const html = `<!doctype html><meta charset="utf-8"><title>Redirecting…</title>
-  <script>
-    const url = ${JSON.stringify(dest.toString())};
-    try { parent.postMessage({ type: 'zap-redirect', url }, '*'); } catch (e) {}
-    try { top.location.replace(url); } catch (e) {}
-  </script>
-  <p>Redirecting…</p>`;
-  return new Response(html, { headers: { 'content-type': 'text/html' } });
+  // Decide the base destination (customize as needed)
+  const base = decideDestination(data);              // must be ABSOLUTE https://...
+  const out = new URL(base);
+
+  // Append original fields to the destination as query params
+  // (Consider whitelisting allowed keys to avoid leaking PII)
+  for (const [k, v] of Object.entries(data)) {
+    if (v != null) out.searchParams.append(k, String(v));
+  }
+
+  // 303 = POST-redirect-get semantics, but also fine for GET
+  return new Response(null, { status: 303, headers: { Location: out.toString() } });
 }
 
 function decideDestination({ email = '' }) {
