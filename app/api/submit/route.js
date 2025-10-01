@@ -42,11 +42,3 @@ export async function GET(req) {
     }
   });
 }
-
-// Customize this to your logic
-function decideDestination({ email = '' }) {
-  const e = String(email).toLowerCase();
-  return e.endsWith('@enterprise.com')
-    ? 'https://example.com/enterprise-thankyou'
-    : 'https://example.com/thankyou';
-}
