@@ -37,7 +37,7 @@ export async function POST(req) {
 <p>One moment… (${buildTag})</p>
 <script>
   const jobId = ${JSON.stringify(job_id)};
-  const start = Date.now(), timeoutMs = 20000, fallback = "/thanks";
+  const start = Date.now(), timeoutMs = 60000, fallback = "/thanks";
   (async function poll(){
     try {
       const r = await fetch(${JSON.stringify(origin)} + '/api/status?job_id=' + jobId, { cache: 'no-store' });
