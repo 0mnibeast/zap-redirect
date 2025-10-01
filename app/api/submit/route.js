@@ -11,28 +11,35 @@ export async function GET(req) {
   const callback_url = `${origin}/api/callback`;
 
   const hook = process.env.ZAPIER_CATCH_HOOK_URL;
-  if (!hook) return new Response('Missing ZAPIER_CATCH_HOOK_URL', { status: 500 });
+  if (!hook) {
+    return new Response('Missing ZAPIER_CATCH_HOOK_URL (set the **LIVE** Catch Hook URL and redeploy)', { status: 500 });
+  }
 
-  // ---- IMPORTANT: await the POST to Zapier and retry once ----
-  const body = JSON.stringify({ job_id, callback_url, form });
+  // --- await + retry once ---
+  const payload = JSON.stringify({ job_id, callback_url, form });
   const headers = { 'content-type': 'application/json', 'x-request-id': job_id };
-
   let ok = false, lastErr = '';
+
   for (let attempt = 1; attempt <= 2; attempt++) {
     try {
-      const r = await fetch(hook, { method: 'POST', headers, body, cache: 'no-store' });
+      const r = await fetch(hook, { method: 'POST', headers, body: payload, cache: 'no-store' });
       ok = r.ok;
-      if (!ok) lastErr = `${r.status} ${await r.text().catch(()=> '')}`;
+      if (!ok) lastErr = `${r.status} ${await r.text().catch(()=>'')}`;
       if (ok) break;
     } catch (e) {
       lastErr = String(e?.message || e);
     }
-    // brief backoff before retry
-    await new Promise(res => setTimeout(res, 150));
+    await new Promise(res => setTimeout(res, 150)); // tiny backoff
   }
-  if (!ok) return new Response(`Failed to notify Zap: ${lastErr}`, { status: 502 });
 
-  // minimal processing page that polls status and redirects
+  if (!ok) {
+    return new Response(
+      `Failed to notify Zap (check Zap is ON and URL is LIVE). Last error: ${lastErr}`,
+      { status: 502, headers: { 'content-type': 'text/plain', 'cache-control': 'no-store' } }
+    );
+  }
+
+  // Processing page that polls /status and redirects when your Zap posts back
   const timeoutMs = 120000;
   const html = `<!doctype html><meta charset="utf-8"><title>Processing…</title>
   <style>body{font:16px system-ui;margin:3rem;line-height:1.45}</style>
