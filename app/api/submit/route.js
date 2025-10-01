@@ -3,42 +3,59 @@ export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 
 export async function GET(req) {
-  // 1) Read the fields Interfaces appended as query params
+  // 1) Gather the form fields that Interfaces added as ?foo=bar
   const inUrl = new URL(req.url);
-  const data = Object.fromEntries(inUrl.searchParams.entries());
+  const form = Object.fromEntries(inUrl.searchParams.entries());
 
-  // 2) Decide your base destination (ABSOLUTE URL only)
-  const base = decideDestination(data);
-  const out = new URL(base);
+  // 2) Make job + callback url
+  const job_id = crypto.randomUUID();
+  const origin = inUrl.origin;
+  const callback_url = `${origin}/api/callback`;
 
-  // 3) Append the same fields to the destination (whitelist if needed)
-  for (const [k, v] of Object.entries(data)) {
-    if (v != null) out.searchParams.append(k, String(v));
+  // 3) Kick off your Zap (fire-and-forget; DO NOT await)
+  const hook = process.env.ZAPIER_CATCH_HOOK_URL;
+  if (!hook) {
+    return new Response('Missing ZAPIER_CATCH_HOOK_URL', { status: 500 });
   }
+  fetch(hook, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ job_id, callback_url, form })
+  }).catch(() => {});
 
-  // 4) Optional: fire-and-forget webhook to your Zap (does NOT block redirect)
-  if (process.env.ZAPIER_CATCH_HOOK_URL) {
-    fetch(process.env.ZAPIER_CATCH_HOOK_URL, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ form: data, redirected_to: out.toString(), source: 'interfaces-top-level' })
-    }).catch(() => {});
-  }
-
-  // 5) Send a 302 + HTML+JS fallback to be extra bulletproof
+  // 4) Return a tiny page that polls /api/status until Zap responds
+  const timeoutMs = 120000; // 2 minutes while testing
   const html = `<!doctype html><meta charset="utf-8">
-<title>Redirecting…</title>
-<meta http-equiv="refresh" content="0;url=${out.toString().replace(/"/g, '%22')}">
-<script>try{ top.location.replace(${JSON.stringify(out.toString())}); }catch(e){ location.href=${JSON.stringify(out.toString())}; }</script>
-<p>Redirecting…</p>`;
+  <title>Processing…</title>
+  <style>body{font:16px system-ui;margin:3rem;max-width:680px;line-height:1.45}</style>
+  <h1>Processing…</h1>
+  <p>We’re finishing your submission. This usually takes a few seconds.</p>
+  <p style="color:#666">Job: <code>${job_id}</code></p>
+  <script>
+    const jobId = ${JSON.stringify(job_id)};
+    const origin = ${JSON.stringify(origin)};
+    const started = Date.now();
+    const timeoutMs = ${timeoutMs};
 
-  return new Response(html, {
-    status: 302, // 302 works fine for GET; some networks mishandle 303s
-    headers: {
-      'Location': out.toString(),
-      'Content-Type': 'text/html; charset=utf-8',
-      'Cache-Control': 'no-store, max-age=0',
-      'Referrer-Policy': 'no-referrer'
+    async function poll() {
+      try {
+        const r = await fetch(origin + '/api/status?job_id=' + jobId, { cache: 'no-store' });
+        const j = await r.json();
+        if (j && j.redirect_url) {
+          top.location.replace(j.redirect_url);
+          return;
+        }
+      } catch (_) {}
+      if (Date.now() - started > timeoutMs) {
+        // optional: default/fallback if the Zap never replies
+        top.location.replace('/thanks');
+        return;
+      }
+      setTimeout(poll, 800);
     }
+    poll();
+  </script>`;
+  return new Response(html, {
+    headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' }
   });
 }
