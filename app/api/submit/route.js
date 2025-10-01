@@ -30,10 +30,3 @@ export async function POST(req) {
   return new Response(null, { status: 302, headers: { Location: redirectUrl } });
 }
 
-function chooseRedirect(form) {
-  const email = (form.email || '').toString().toLowerCase();
-  if (email.endsWith('@enterprise.com')) {
-    return 'https://example.com/enterprise-thankyou';
-  }
-  return 'https://example.com/thankyou';
-}
