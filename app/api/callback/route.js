@@ -1,5 +1,7 @@
 export const runtime = 'edge';
-export const dynamic = 'force-dynamic';
+
+// ⚠️ In-memory store (testing only)
+const store = new Map();
 
 export async function GET() {
   return new Response('callback endpoint is live; use POST', {
@@ -12,16 +14,9 @@ export async function POST(req) {
   try { body = await req.json(); } catch {}
   const { job_id, redirect_url } = body || {};
   if (!job_id || !redirect_url) return new Response('bad request', { status: 400 });
-  // For now, just echo (we’ll wire storage later)
+
+  store.set(job_id, redirect_url);         // ← save it
   return new Response('ok');
 }
 
-export async function OPTIONS() {
-  return new Response(null, {
-    headers: {
-      'access-control-allow-origin': '*',
-      'access-control-allow-headers': 'content-type,x-callback-secret',
-      'access-control-allow-methods': 'POST,OPTIONS,GET',
-    }
-  });
-}
+export { store }; // exported for /status
