@@ -8,6 +8,13 @@ export async function GET(req) {
   const inUrl = new URL(req.url);
   const form = Object.fromEntries(inUrl.searchParams.entries());
 
+  // NEW: choose how to redirect when the Zap returns the final URL
+  // target=frame  -> only the embedded iframe navigates
+  // target=top    -> whole browser window navigates (default)
+  // target=parent -> send a postMessage; parent decides
+  const target = (inUrl.searchParams.get('target') || 'top').toLowerCase();
+
+  // 1) Make job + callback and notify Zap (await + retry)
   const job_id = crypto.randomUUID();
   const origin = inUrl.origin;
   const callback_url = `${origin}/api/callback`;
@@ -15,20 +22,26 @@ export async function GET(req) {
   const hook = process.env.ZAPIER_CATCH_HOOK_URL;
   if (!hook) return new Response('Missing ZAPIER_CATCH_HOOK_URL', { status: 500 });
 
-  // await + tiny retry so the webhook really fires
   const payload = JSON.stringify({ job_id, callback_url, form });
   const headers = { 'content-type': 'application/json', 'x-request-id': job_id, 'cache-control': 'no-store' };
-  let ok = false; let lastErr = '';
+  let ok = false, lastErr = '';
   for (let i = 0; i < 2; i++) {
     try {
       const r = await fetch(hook, { method: 'POST', headers, body: payload, cache: 'no-store' });
-      if (r.ok) { ok = true; break; }
+      ok = r.ok;
+      if (ok) break;
       lastErr = `${r.status} ${await r.text().catch(()=> '')}`;
     } catch (e) { lastErr = String(e?.message || e); }
     await new Promise(res => setTimeout(res, 150));
   }
-  if (!ok) return new Response(`Failed to notify Zap: ${lastErr}`, { status: 502, headers: { 'cache-control': 'no-store' } });
+  if (!ok) {
+    return new Response(`Failed to notify Zap: ${lastErr}`, {
+      status: 502,
+      headers: { 'cache-control': 'no-store' }
+    });
+  }
 
+  // 2) Branded processing page that polls /api/status and then redirects
   const timeoutMs = 120000;
   const html = `<!doctype html>
 <html lang="en">
@@ -53,19 +66,43 @@ export async function GET(req) {
     <p>We’re finishing your submission — this usually takes a few seconds.</p>
   </div>
   <script>
-    const jobId=${JSON.stringify(job_id)}, origin=${JSON.stringify(origin)}, start=Date.now(), timeoutMs=${timeoutMs};
+    const jobId = ${JSON.stringify(job_id)};
+    const origin = ${JSON.stringify(origin)};
+    const target = ${JSON.stringify(target)};
+    const start = Date.now();
+    const timeoutMs = ${timeoutMs};
+
+    function navigate(url){
+      try {
+        if (target === 'frame') {
+          // stay inside the embed only
+          window.location.replace(url);
+        } else if (target === 'parent') {
+          // let the parent page handle it (e.g., update a section/SPA route)
+          parent.postMessage({ type: 'zap-redirect', url }, '*');
+        } else {
+          // default: redirect the whole browser window
+          top.location.replace(url);
+        }
+      } catch (e) {
+        // last-resort: same-frame
+        window.location.href = url;
+      }
+    }
+
     (async function poll(){
-      try{
-        const r=await fetch(origin + '/api/status?job_id=' + jobId, {cache:'no-store'});
-        const j=await r.json();
-        if (j && j.redirect_url) { top.location.replace(j.redirect_url); return; }
-      }catch{}
-      if (Date.now()-start > timeoutMs) { top.location.replace('/thanks'); return; }
+      try {
+        const r = await fetch(origin + '/api/status?job_id=' + jobId, { cache: 'no-store' });
+        const j = await r.json();
+        if (j && j.redirect_url) { navigate(j.redirect_url); return; }
+      } catch {}
+      if (Date.now() - start > timeoutMs) { navigate('/thanks'); return; }
       setTimeout(poll, 800);
     })();
   </script>
 </body>
 </html>`;
+
   return new Response(html, {
     headers: {
       'content-type': 'text/html; charset=utf-8',
