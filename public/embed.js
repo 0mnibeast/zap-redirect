@@ -10,6 +10,6 @@
   });
   const iframe = document.createElement('iframe');
   iframe.src = `https://<your-app>.vercel.app/t/${tenant}/api/submit?${params}`;
-  iframe.style = 'max-width:900px;width:100%;height:500px;border:0;';
+  iframe.style = 'width:100%;height:100%;border:0;';
   s.parentNode.insertBefore(iframe, s);
 })();
