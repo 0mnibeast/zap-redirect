@@ -1,33 +1,46 @@
-// app/t/[tenant]/api/status/route.ts
+// app/t/[tenant]/api/status/route.js
 export const runtime = 'edge';
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 export const fetchCache = 'force-no-store';
 
-type Params = { params: { tenant: string } };
-
-export async function GET(req: Request, { params }: Params) {
-  const { SUPABASE_URL, SUPABASE_ANON_KEY } = process.env as Record<string, string>;
+export async function GET(req, context) {
+  const { SUPABASE_URL, SUPABASE_ANON_KEY } = process.env || {};
   if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
-    return Response.json({ error: 'server not configured' }, { status: 500 });
+    return new Response(JSON.stringify({ error: 'server not configured' }), { status: 500 });
   }
 
-  const tenant_id = (params.tenant || 'default').toLowerCase();
+  const tenant_id = (context?.params?.tenant || 'default').toLowerCase();
   const url = new URL(req.url);
   const job_id = url.searchParams.get('job_id') || '';
-  if (!job_id) return Response.json({ error: 'missing job_id' }, { status: 400 });
+  if (!job_id) return new Response(JSON.stringify({ error: 'missing job_id' }), { status: 400 });
 
-  const r = await fetch(
-    `${SUPABASE_URL}/rest/v1/redirects?tenant_id=eq.${encodeURIComponent(tenant_id)}&job_id=eq.${encodeURIComponent(job_id)}&select=redirect_url`,
-    { headers: { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${SUPABASE_ANON_KEY}`, Accept: 'application/json' }, cache: 'no-store' }
-  );
+  const qs = new URLSearchParams({
+    'tenant_id': `eq.${tenant_id}`,
+    'job_id': `eq.${job_id}`,
+    'select': 'redirect_url'
+  });
 
-  if (!r.ok) return Response.json({ error: 'supabase read error' }, { status: 502 });
+  const r = await fetch(`${SUPABASE_URL}/rest/v1/redirects?${qs.toString()}`, {
+    headers: {
+      apikey: SUPABASE_ANON_KEY,
+      Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+      Accept: 'application/json'
+    },
+    cache: 'no-store'
+  });
 
-  const rows = await r.json().catch(() => []);
+  if (!r.ok) return new Response(JSON.stringify({ error: 'supabase read error' }), { status: 502 });
+
+  let rows = [];
+  try { rows = await r.json(); } catch {}
   const redirect_url = rows?.[0]?.redirect_url ?? null;
 
-  return Response.json({ redirect_url }, {
-    headers: { 'cache-control': 'no-store, no-cache, must-revalidate, max-age=0', pragma: 'no-cache' }
+  return new Response(JSON.stringify({ redirect_url }), {
+    headers: {
+      'content-type': 'application/json; charset=utf-8',
+      'cache-control': 'no-store, no-cache, must-revalidate, max-age=0',
+      'pragma': 'no-cache'
+    }
   });
 }
