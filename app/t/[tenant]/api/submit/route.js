@@ -117,21 +117,45 @@ export async function GET(req, context) {
     const start=Date.now(), timeoutMs=${timeoutMs};
     document.documentElement.style.setProperty('--spinColor', ${JSON.stringify(spinColor)});
 
+    // --- NEW: auto-resize so the parent iframe fits this page ---
+    (function autoResizeUp(){
+      function send(){
+        const h = Math.max(
+          document.body.scrollHeight, document.documentElement.scrollHeight,
+          document.body.offsetHeight,  document.documentElement.offsetHeight
+        );
+        parent.postMessage({ type:'frame-height', height:h }, '*');
+      }
+      send();
+      const ro = new ResizeObserver(send);
+      ro.observe(document.body);
+      setInterval(send, 1000); // belt-and-suspenders
+    })();
+
+    // --- Safer navigate: if embedded and target is wrong/missing, keep it in-frame ---
     function navigate(url){
+      const inIframe = window.self !== window.top;
       try{
-        if(target==='frame'){location.replace(url);}
-        else if(target==='parent'){parent.postMessage({type:'zap-redirect',url},'*');}
-        else{top.location.replace(url);}
-      }catch{location.href=url;}
+        if (target === 'frame' || (inIframe && target !== 'parent')) {
+          // Stay within the iframe when embedded unless parent-handled is requested
+          window.location.replace(url);
+        } else if (target === 'parent') {
+          parent.postMessage({ type:'zap-redirect', url }, '*');
+        } else {
+          top.location.replace(url); // only used when not embedded
+        }
+      }catch{
+        window.location.href = url;
+      }
     }
 
     (async function poll(){
       try{
-        const r=await fetch(origin + '/t/' + tenantId + '/api/status?job_id=' + jobId, { cache:'no-store' });
-        const j=await r.json();
-        if(j && j.redirect_url){ navigate(j.redirect_url); return; }
+        const r = await fetch(origin + '/t/' + tenantId + '/api/status?job_id=' + jobId, { cache:'no-store' });
+        const j = await r.json();
+        if (j && j.redirect_url) { navigate(j.redirect_url); return; }
       }catch{}
-      if(Date.now()-start > timeoutMs){ navigate('/thanks'); return; }
+      if (Date.now() - start > timeoutMs) { navigate('/thanks'); return; }
       setTimeout(poll, 800);
     })();
   </script>
@@ -142,7 +166,7 @@ export async function GET(req, context) {
     headers: {
       'content-type': 'text/html; charset=utf-8',
       'cache-control': 'no-store, no-cache, must-revalidate, max-age=0',
-      pragma: 'no-cache',
+      'pragma': 'no-cache',
     },
   });
 }
