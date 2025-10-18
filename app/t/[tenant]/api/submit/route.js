@@ -1,26 +1,22 @@
-// app/t/[tenant]/api/submit/route.ts
+// app/t/[tenant]/api/submit/route.js
 export const runtime = 'edge';
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 export const fetchCache = 'force-no-store';
 
-type Params = { params: { tenant: string } };
-
-export async function GET(req: Request, { params }: Params) {
+export async function GET(req, context) {
   const inUrl = new URL(req.url);
   const form = Object.fromEntries(inUrl.searchParams.entries());
 
   // Tenant from path segment
-  const tenant_id = (params.tenant || 'default').toLowerCase();
+  const tenant_id = (context?.params?.tenant || 'default').toLowerCase();
 
   // Redirect scope (frame | parent | top)
   const target = (inUrl.searchParams.get('target') || 'top').toLowerCase();
 
-  // Custom styling params (with safe defaults)
+  // Custom styling params
   const bg = decodeURIComponent(inUrl.searchParams.get('bg') || '#ff4f00');
-  const msg = decodeURIComponent(
-    inUrl.searchParams.get('msg') || 'Hang tight while we route your request…'
-  );
+  const msg = decodeURIComponent(inUrl.searchParams.get('msg') || 'Hang tight while we route your request…');
   const anim = (inUrl.searchParams.get('anim') || 'circle').toLowerCase();
   const spinColor = decodeURIComponent(inUrl.searchParams.get('spinColor') || '#ffffff');
 
@@ -40,18 +36,17 @@ export async function GET(req: Request, { params }: Params) {
     'cache-control': 'no-store',
   };
 
-  // Await fire; keep it simple (add retries if you like)
   try {
     await fetch(hook, { method: 'POST', headers, body: payload, cache: 'no-store' });
   } catch (e) {
-    return new Response(`Failed to notify Zap: ${String((e as Error)?.message || e)}`, {
+    return new Response(`Failed to notify Zap: ${String(e?.message || e)}`, {
       status: 502,
       headers: { 'cache-control': 'no-store' },
     });
   }
 
-  // HTML
   const timeoutMs = 120000;
+
   const html = `<!doctype html>
 <html lang="en">
 <meta charset="utf-8" />
