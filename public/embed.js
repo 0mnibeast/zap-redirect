@@ -1,15 +1,44 @@
 (function(){
   const s = document.currentScript;
-  const tenant = s.dataset.tenant || 'default';
-  const params = new URLSearchParams({
-    target: s.dataset.target || 'parent',
-    bg: s.dataset.bg || '#ff4f00',
-    anim: s.dataset.anim || 'circle',
-    msg: s.dataset.msg || 'Routing...',
-    _ts: Date.now()
-  });
-  const iframe = document.createElement('iframe');
-  iframe.src = `https://<your-app>.vercel.app/t/${tenant}/api/submit?${params}`;
-  iframe.style = 'width:100%;height:100%;border:0;';
-  s.parentNode.insertBefore(iframe, s);
+  const tenant = (s.dataset.tenant || 'default').toLowerCase();
+  const key    = (s.dataset.key || 'default').toLowerCase();
+
+  // Build the processing iframe (no style in URL)
+  const frame = document.createElement('iframe');
+  frame.id = s.dataset.id || 'lead-frame';
+  frame.style.cssText = s.dataset.style || 'max-width:900px;width:100%;height:500px;border:0;';
+  frame.src = `/t/${tenant}/api/submit?_ts=${Date.now()}`;
+  s.parentNode.insertBefore(frame, s);
+
+  // Fetch theme from your API (near-zero latency)
+  fetch(`/api/styles/get?tenant=${encodeURIComponent(tenant)}&key=${encodeURIComponent(key)}`, { cache: 'no-store' })
+    .then(r => r.json())
+    .then(({ theme }) => {
+      const cfg = {
+        target: (theme?.target || 'parent').toLowerCase(),
+        theme: {
+          bg: theme?.bg,
+          msg: theme?.msg,
+          anim: (theme?.anim || 'spinner').toLowerCase(),
+          spinColor: theme?.spinColor
+        }
+      };
+
+      // Listen for processing page handshake + messages
+      function onMsg(ev){
+        const m = ev.data || {};
+        if (m.type === 'zap-config-request') {
+          frame.contentWindow?.postMessage({ type:'zap-config', cfg }, '*');
+        } else if (m.type === 'zap-redirect' && typeof m.url === 'string') {
+          try { frame.src = m.url; } catch { window.open(m.url, '_blank', 'noopener'); }
+        } else if ((m.type === 'frame-height' || m.type === 'resize') && typeof m.height === 'number') {
+          frame.style.height = m.height + 'px';
+        }
+      }
+      window.addEventListener('message', onMsg);
+
+      // Push config even if request is missed
+      setTimeout(() => frame.contentWindow?.postMessage({ type:'zap-config', cfg }, '*'), 1200);
+    })
+    .catch(err => console.warn('theme load failed', err));
 })();
