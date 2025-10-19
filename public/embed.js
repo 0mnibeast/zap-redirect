@@ -1,17 +1,17 @@
 (function(){
   const s = document.currentScript;
-  const tenant = (s.dataset.tenant || 'default').toLowerCase();
+  const ttheme = (s.dataset.ttheme || 'default').toLowerCase();
   const key    = (s.dataset.key || 'default').toLowerCase();
 
   // Build the processing iframe (no style in URL)
   const frame = document.createElement('iframe');
   frame.id = s.dataset.id || 'lead-frame';
   frame.style.cssText = s.dataset.style || 'max-width:900px;width:100%;height:500px;border:0;';
-  frame.src = `/t/${tenant}/api/submit?_ts=${Date.now()}`;
+  frame.src = `/t/${ttheme}/api/submit?_ts=${Date.now()}`;
   s.parentNode.insertBefore(frame, s);
 
   // Fetch theme from your API (near-zero latency)
-  fetch(`/api/styles/get?tenant=${encodeURIComponent(tenant)}&key=${encodeURIComponent(key)}`, { cache: 'no-store' })
+  fetch(`/api/styles/get?ttheme=${encodeURIComponent(ttheme)}&key=${encodeURIComponent(key)}`, { cache: 'no-store' })
     .then(r => r.json())
     .then(({ theme }) => {
       const cfg = {
