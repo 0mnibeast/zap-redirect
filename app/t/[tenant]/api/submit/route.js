@@ -11,7 +11,10 @@ export async function GET(req, context) {
   // Tenant from path segment
   const tenant_id = (context?.params?.tenant || 'default').toLowerCase();
 
-  // Default redirect scope; parent config can override later
+  // Optional style key from query (?key=foo), defaults to "default"
+  const style_key = (inUrl.searchParams.get('key') || 'default').toLowerCase();
+
+  // Default redirect scope; parent config may override it later
   const urlTarget = (inUrl.searchParams.get('target') || 'top').toLowerCase();
 
   // Create job + callback
@@ -52,7 +55,7 @@ export async function GET(req, context) {
   :root { --spinColor: #ffffff; }
   html,body{
     height:100%;margin:0;display:flex;align-items:center;justify-content:center;
-    background:#ff4f00;color:white; /* default bg; parent config may override */
+    background:#ff4f00;color:white; /* default bg; parent/fetch config may override */
     font-family:system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
   }
 
@@ -103,16 +106,16 @@ export async function GET(req, context) {
   </div>
 
   <script>
-    // --- debug toggle ---
     const DEBUG = false;
     const log = (...a) => { if (DEBUG) try { console.log('[router]', ...a); } catch {} };
 
-    const jobId    = ${JSON.stringify(job_id)};
-    const tenantId = ${JSON.stringify(tenant_id)};
-    const origin   = ${JSON.stringify(origin)};
-    let   target   = ${JSON.stringify(urlTarget)}; // may be overridden by parent config
+    const jobId     = ${JSON.stringify(job_id)};
+    const tenantId  = ${JSON.stringify(tenant_id)};
+    const styleKey  = ${JSON.stringify(style_key)};
+    const origin    = ${JSON.stringify(origin)};
+    let   target    = ${JSON.stringify(urlTarget)}; // may be overridden by config
 
-    const start    = Date.now();
+    const start     = Date.now();
     const timeoutMs = ${timeoutMs};
 
     // --- Auto-resize (debounced) ---
@@ -142,7 +145,6 @@ export async function GET(req, context) {
         const el = document.querySelector('.msg');
         if (el) el.textContent = t.msg;
       }
-      // swap animation node if requested
       const animName = (t.anim || '').toLowerCase();
       if (animName) {
         const host = document.getElementById('anim');
@@ -158,25 +160,44 @@ export async function GET(req, context) {
       }
     }
 
-    // --- Accept theme/target config from parent (both proactive & on request) ---
+    // --- Accept theme/target config from parent (proactive & on request) ---
     function handleConfigMessage(m){
       if (!m || m.type !== 'zap-config' || !m.cfg) return;
       const t = m.cfg.theme || {};
       if (m.cfg.target) target = (m.cfg.target + '').toLowerCase();
-      log('applied config', { target, theme: t });
+      log('applied parent config', { target, theme: t });
       applyTheme(t);
     }
 
-    // Ask parent for config; parent may also proactively send it
     try { parent.postMessage({ type:'zap-config-request' }, '*'); } catch {}
     window.addEventListener('message', (ev) => {
       const m = ev.data || {};
       if (m.type === 'zap-config') handleConfigMessage(m);
-
-      if (m.type === 'zap-redirect' && typeof m.url === 'string') {
-        navigate(m.url);
-      }
+      if (m.type === 'zap-redirect' && typeof m.url === 'string') navigate(m.url);
     });
+
+    // --- Fallback: fetch latest theme directly from your API (cache-busted) ---
+    async function fetchThemeFallback(){
+      try {
+        const u = origin + '/api/styles/get?tenant=' + encodeURIComponent(tenantId)
+                               + '&key=' + encodeURIComponent(styleKey)
+                               + '&t=' + Date.now();
+        const r = await fetch(u, { cache: 'no-store' });
+        if (!r.ok) return;
+        const j = await r.json();
+        const t = j?.theme || null;
+        if (t) {
+          if (t.target) target = (t.target + '').toLowerCase();
+          log('applied fetched config', { target, theme: t });
+          applyTheme(t);
+        }
+      } catch (e) {
+        log('fetchThemeFallback error', e?.message || e);
+      }
+    }
+    // run immediately and once more shortly after to beat races
+    fetchThemeFallback();
+    setTimeout(fetchThemeFallback, 800);
 
     // --- Navigation guard: keep in-iframe when embedded unless parent-handled ---
     function navigate(url){
