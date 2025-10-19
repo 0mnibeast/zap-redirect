@@ -179,7 +179,7 @@ export async function GET(req, context) {
     // --- Fallback: fetch latest theme directly from your API (cache-busted) ---
     async function fetchThemeFallback(){
       try {
-        const u = origin + '/api/styles/get?tenant=' + encodeURIComponent(tenantId)
+        const u = origin + '/api/styles/get?ttheme=' + encodeURIComponent(tenantId)
                                + '&key=' + encodeURIComponent(styleKey)
                                + '&t=' + Date.now();
         const r = await fetch(u, { cache: 'no-store' });
