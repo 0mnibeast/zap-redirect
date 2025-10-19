@@ -15,11 +15,11 @@ export async function POST(req) {
 
   let body;
   try { body = await req.json(); } catch { return new Response('bad json', { status: 400 }); }
-  const tenant = (body.tenant || '').toLowerCase();
+  const ttheme = (body.ttheme || '').toLowerCase();
   const key = (body.key || 'default').toLowerCase();
-  const theme = body.theme || null;
+  const ttheme = body.ttheme || null;
 
-  if (!tenant || !theme) return new Response('missing tenant or theme', { status: 400 });
+  if (!ttheme || !ttheme) return new Response('missing ttheme or ttheme', { status: 400 });
 
   const r = await fetch(`${SUPABASE_URL}/rest/v1/styles`, {
     method: 'POST',
@@ -29,7 +29,7 @@ export async function POST(req) {
       'Content-Type': 'application/json',
       Prefer: 'resolution=merge-duplicates'
     },
-    body: JSON.stringify({ tenant, key, theme, updated_at: new Date().toISOString() })
+    body: JSON.stringify({ ttheme, key, ttheme, updated_at: new Date().toISOString() })
   });
 
   if (!r.ok) {
