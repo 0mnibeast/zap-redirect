@@ -8,11 +8,11 @@ export async function GET(req) {
   }
 
   const url = new URL(req.url);
-  const tenant = (url.searchParams.get('tenant') || 'default').toLowerCase();
+  const ttheme = (url.searchParams.get('ttheme') || 'default').toLowerCase();
   const key = (url.searchParams.get('key') || 'default').toLowerCase();
 
   const qs = new URLSearchParams({
-    tenant: `eq.${tenant}`,
+    ttheme: `eq.${ttheme}`,
     key: `eq.${key}`,
     select: 'theme,updated_at',
     limit: '1'
