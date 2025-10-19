@@ -11,7 +11,7 @@ export async function GET(req, context) {
   // Tenant from path segment
   const tenant_id = (context?.params?.tenant || 'default').toLowerCase();
 
-  // Redirect scope default; parent-config may override it later
+  // Default redirect scope; parent config can override later
   const urlTarget = (inUrl.searchParams.get('target') || 'top').toLowerCase();
 
   // Create job + callback
@@ -21,13 +21,15 @@ export async function GET(req, context) {
 
   // Notify Zapier (multi-tenant payload)
   const hook = process.env.ZAPIER_CATCH_HOOK_URL;
-  if (!hook) return new Response('Missing ZAPIER_CATCH_HOOK_URL', { status: 500 });
+  if (!hook) {
+    return new Response('Missing ZAPIER_CATCH_HOOK_URL', { status: 500 });
+  }
 
   const payload = JSON.stringify({ tenant_id, job_id, callback_url, form });
   const headers = {
     'content-type': 'application/json',
     'x-request-id': job_id,
-    'cache-control': 'no-store',
+    'cache-control': 'no-store'
   };
 
   try {
@@ -35,7 +37,7 @@ export async function GET(req, context) {
   } catch (e) {
     return new Response(`Failed to notify Zap: ${String(e?.message || e)}`, {
       status: 502,
-      headers: { 'cache-control': 'no-store' },
+      headers: { 'cache-control': 'no-store' }
     });
   }
 
@@ -50,11 +52,11 @@ export async function GET(req, context) {
   :root { --spinColor: #ffffff; }
   html,body{
     height:100%;margin:0;display:flex;align-items:center;justify-content:center;
-    background:#ff4f00;color:white; /* default bg; parent config can override */
+    background:#ff4f00;color:white; /* default bg; parent config may override */
     font-family:system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
   }
 
-  /* ===== Animations (default = spinner; parent config can swap) ===== */
+  /* ===== Loaders ===== */
   .spinner{width:60px;height:60px;border:6px solid rgba(255,255,255,0.3);
     border-top-color:var(--spinColor);border-radius:50%;
     animation:spin 1s linear infinite;margin:0 auto 24px;}
@@ -101,70 +103,93 @@ export async function GET(req, context) {
   </div>
 
   <script>
-    const jobId   = ${JSON.stringify(job_id)};
-    const tenantId= ${JSON.stringify(tenant_id)};
-    const origin  = ${JSON.stringify(origin)};
-    let   target  = ${JSON.stringify(urlTarget)}; // may be overridden by parent config
-    const start   = Date.now();
+    // --- debug toggle ---
+    const DEBUG = false;
+    const log = (...a) => { if (DEBUG) try { console.log('[router]', ...a); } catch {} };
+
+    const jobId    = ${JSON.stringify(job_id)};
+    const tenantId = ${JSON.stringify(tenant_id)};
+    const origin   = ${JSON.stringify(origin)};
+    let   target   = ${JSON.stringify(urlTarget)}; // may be overridden by parent config
+
+    const start    = Date.now();
     const timeoutMs = ${timeoutMs};
 
-    // --- Auto-resize so the parent iframe fits this page ---
+    // --- Auto-resize (debounced) ---
     (function autoResizeUp(){
-      function send(){
-        const h = Math.max(
-          document.body.scrollHeight, document.documentElement.scrollHeight,
-          document.body.offsetHeight,  document.documentElement.offsetHeight
-        );
-        parent.postMessage({ type:'frame-height', height:h }, '*');
-      }
-      send();
+      let raf = 0;
+      const send = () => {
+        cancelAnimationFrame(raf);
+        raf = requestAnimationFrame(() => {
+          const h = Math.max(
+            document.body.scrollHeight, document.documentElement.scrollHeight,
+            document.body.offsetHeight,  document.documentElement.offsetHeight
+          );
+          parent.postMessage({ type:'frame-height', height:h }, '*');
+        });
+      };
       const ro = new ResizeObserver(send);
       ro.observe(document.body);
+      send();
       setInterval(send, 1000);
     })();
 
-    // --- Accept theme/target config from parent (no URL params needed) ---
+    // --- Apply theme helper ---
+    function applyTheme(t = {}) {
+      if (t.bg) document.body.style.background = t.bg;
+      if (t.spinColor) document.documentElement.style.setProperty('--spinColor', t.spinColor);
+      if (t.msg) {
+        const el = document.querySelector('.msg');
+        if (el) el.textContent = t.msg;
+      }
+      // swap animation node if requested
+      const animName = (t.anim || '').toLowerCase();
+      if (animName) {
+        const host = document.getElementById('anim');
+        if (host) {
+          host.outerHTML =
+            animName==='pulse' ? '<div class="pulse"></div>' :
+            animName==='bar'   ? '<div class="bar"></div>'   :
+            animName==='wave'  ? '<div class="wave"><div></div><div></div><div></div><div></div><div></div></div>' :
+            animName==='dots'  ? '<div class="dots"><span></span><span></span><span></span></div>' :
+            animName==='zlogo' ? '<div class="zlogo"><svg viewBox="0 0 32 32"><path d="M3 6h26v5l-14 15h14v5H3v-5l14-15H3z" fill="currentColor"/></svg></div>' :
+                                 '<div class="spinner"></div>';
+        }
+      }
+    }
+
+    // --- Accept theme/target config from parent (both proactive & on request) ---
+    function handleConfigMessage(m){
+      if (!m || m.type !== 'zap-config' || !m.cfg) return;
+      const t = m.cfg.theme || {};
+      if (m.cfg.target) target = (m.cfg.target + '').toLowerCase();
+      log('applied config', { target, theme: t });
+      applyTheme(t);
+    }
+
+    // Ask parent for config; parent may also proactively send it
     try { parent.postMessage({ type:'zap-config-request' }, '*'); } catch {}
     window.addEventListener('message', (ev) => {
       const m = ev.data || {};
-      if (m.type === 'zap-config' && m.cfg) {
-        const t = (m.cfg.theme || {});
-        if (m.cfg.target) target = (m.cfg.target + '').toLowerCase();
+      if (m.type === 'zap-config') handleConfigMessage(m);
 
-        if (t.bg) document.body.style.background = t.bg;
-        if (t.spinColor) document.documentElement.style.setProperty('--spinColor', t.spinColor);
-        if (t.msg) {
-          const el = document.querySelector('.msg');
-          if (el) el.textContent = t.msg;
-        }
-
-        // swap animation node if requested
-        const animName = (t.anim || '').toLowerCase();
-        if (animName) {
-          const host = document.getElementById('anim');
-          if (host) {
-            let html =
-              animName==='pulse' ? '<div class="pulse"></div>' :
-              animName==='bar'   ? '<div class="bar"></div>'   :
-              animName==='wave'  ? '<div class="wave"><div></div><div></div><div></div><div></div><div></div></div>' :
-              animName==='dots'  ? '<div class="dots"><span></span><span></span><span></span></div>' :
-              animName==='zlogo' ? '<div class="zlogo"><svg viewBox="0 0 32 32"><path d="M3 6h26v5l-14 15h14v5H3v-5l14-15H3z" fill="currentColor"/></svg></div>' :
-                                   '<div class="spinner"></div>';
-            host.outerHTML = html; // replace
-          }
-        }
+      if (m.type === 'zap-redirect' && typeof m.url === 'string') {
+        navigate(m.url);
       }
     });
 
-    // --- Safer navigate: prefer in-frame if embedded & target is wrong/missing ---
+    // --- Navigation guard: keep in-iframe when embedded unless parent-handled ---
     function navigate(url){
       const inIframe = window.self !== window.top;
       try{
         if (target === 'frame' || (inIframe && target !== 'parent')) {
+          log('navigate: frame', url);
           window.location.replace(url);   // keep inside the iframe
         } else if (target === 'parent') {
+          log('navigate: parent postMessage', url);
           parent.postMessage({ type:'zap-redirect', url }, '*');
         } else {
+          log('navigate: top', url);
           top.location.replace(url);      // only when not embedded
         }
       }catch{
@@ -172,13 +197,13 @@ export async function GET(req, context) {
       }
     }
 
-    // --- Poll Supabase-backed status for the redirect_url ---
+    // --- Poll status for redirect_url ---
     (async function poll(){
       try{
         const r = await fetch(origin + '/t/' + tenantId + '/api/status?job_id=' + jobId, { cache:'no-store' });
         const j = await r.json();
         if (j && j.redirect_url) { navigate(j.redirect_url); return; }
-      }catch{}
+      }catch(e){ log('poll error', e?.message || e); }
       if (Date.now() - start > timeoutMs) { navigate('/thanks'); return; }
       setTimeout(poll, 800);
     })();
@@ -190,7 +215,7 @@ export async function GET(req, context) {
     headers: {
       'content-type': 'text/html; charset=utf-8',
       'cache-control': 'no-store, no-cache, must-revalidate, max-age=0',
-      'pragma': 'no-cache',
-    },
+      'pragma': 'no-cache'
+    }
   });
 }
